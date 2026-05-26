@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ASCENDING, IndexModel
 
-from app.config import settings
+from src.config import settings
 
 
 # ── Database lifecycle ────────────────────────────────────────────────────────
