@@ -4,8 +4,10 @@ from fastapi import APIRouter
 router = APIRouter()
 
 @router.get("/")
-async def list_items():
+async def list_items(skip: int =0, limit: int = 0):
     return {
+        "skip": skip,
+        "limit": limit,
         "items": []
     }
     
