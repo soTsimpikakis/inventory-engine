@@ -7,8 +7,8 @@ from pymongo import ASCENDING, IndexModel
 from src.config import settings
 from src.inventory.router import router as inventory_router
 
-
 # ── Database lifecycle ────────────────────────────────────────────────────────
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -18,20 +18,25 @@ async def lifespan(app: FastAPI):
 
     app.state.db = db
 
-    # Indexes created idempotently (Milestone 6 requirement)
     inventory = db["inventory"]
-    await inventory.create_indexes([
-        IndexModel([("tenant_id", ASCENDING), ("product_id", ASCENDING)], unique=True),
-        IndexModel([("tenant_id", ASCENDING)]),
-        IndexModel([("sku", ASCENDING)]),
-    ])
+    await inventory.create_indexes(
+        [
+            IndexModel(
+                [("tenant_id", ASCENDING), ("product_id", ASCENDING)], unique=True
+            ),
+            IndexModel([("tenant_id", ASCENDING)]),
+            IndexModel([("sku", ASCENDING)]),
+        ]
+    )
 
     idempotency = db["idempotency_keys"]
-    await idempotency.create_indexes([
-        IndexModel([("idempotency_key", ASCENDING)], unique=True),
-        # TTL index: auto-expire keys after 24 h
-        IndexModel([("created_at", ASCENDING)], expireAfterSeconds=86400),
-    ])
+    await idempotency.create_indexes(
+        [
+            IndexModel([("idempotency_key", ASCENDING)], unique=True),
+            # TTL index: auto-expire keys after 24 h
+            IndexModel([("created_at", ASCENDING)], expireAfterSeconds=86400),
+        ]
+    )
 
     yield
 
@@ -40,6 +45,7 @@ async def lifespan(app: FastAPI):
 
 # ── App factory ───────────────────────────────────────────────────────────────
 
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="Inventory API",
@@ -47,11 +53,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.include_router(
-        inventory_router,
-        prefix="/api/v1/inventory",
-        tags=["inventory"]
-        )
+    app.include_router(inventory_router, prefix="/api/v1/inventory", tags=["inventory"])
 
     @app.get("/healthz")
     async def health():
