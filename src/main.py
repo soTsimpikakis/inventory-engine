@@ -5,6 +5,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ASCENDING, IndexModel
 
 from src.config import settings
+from src.inventory.router import router as inventory_router
 
 
 # ── Database lifecycle ────────────────────────────────────────────────────────
@@ -46,11 +47,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Routers will be registered here as you build each milestone
-    # from app.routers import bulk_sync, reserve, analytics
-    # app.include_router(bulk_sync.router, prefix="/api/v1/inventory")
-    # app.include_router(reserve.router,   prefix="/api/v1/inventory")
-    # app.include_router(analytics.router, prefix="/api/v1/inventory")
+    app.include_router(
+        inventory_router,
+        prefix="/api/v1/inventory",
+        tags=["inventory"]
+        )
 
     @app.get("/healthz")
     async def health():
