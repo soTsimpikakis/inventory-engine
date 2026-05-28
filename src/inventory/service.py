@@ -2,11 +2,15 @@ from datetime import datetime, UTC
 
 from fastapi import HTTPException, Depends, Request
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo import ReturnDocument
+from pymongo import ReturnDocument, UpdateOne
+from pymongo.errors import DuplicateKeyError
+
 from .models import (
+    AnalyticsResponse,
     BulkSyncItem,
     BulkSyncRequest,
     BulkSyncResponse,
+    LowStockItem,
     ReserveRequest,
     ReserveResponse,
 )
@@ -40,41 +44,45 @@ class InventoryService:
             {"idempotency_key": payload.idempotency_key}
         )
         if existing:
-            return BulkSyncResponse(**existing["response"])
+            return BulkSyncResponse(**{**existing["response"], "cached": True})
 
-        for item in payload.items:
-            await self.db["inventory"].update_one(
-                {
-                    "tenant_id": payload.tenant_id,
-                    "product_id": item.product_id,
-                },
+        now = datetime.now(UTC)
+        operations = [
+            UpdateOne(
+                {"tenant_id": payload.tenant_id, "product_id": item.product_id},
                 {
                     "$set": {
                         "sku": item.sku,
                         "quantity": item.quantity,
-                        "updated_at": datetime.now(UTC),
+                        "updated_at": now,
                     },
-                    "$setOnInsert": {
-                        "created_at": datetime.now(UTC),
-                    },
+                    "$setOnInsert": {"created_at": now},
                 },
                 upsert=True,
             )
+            for item in payload.items
+        ]
+        await self.db["inventory"].bulk_write(operations, ordered=False)
 
         response = BulkSyncResponse(
             idempotency_key=payload.idempotency_key,
             tenant_id=payload.tenant_id,
             processed=len(payload.items),
-            cached=False,
         )
 
-        await self.db["idempotency_keys"].insert_one(
-            {
-                "idempotency_key": payload.idempotency_key,
-                "response": response.model_dump(),
-                "created_at": datetime.now(UTC),
-            }
-        )
+        try:
+            await self.db["idempotency_keys"].insert_one(
+                {
+                    "idempotency_key": payload.idempotency_key,
+                    "response": response.model_dump(),
+                    "created_at": now,
+                }
+            )
+        except DuplicateKeyError:
+            existing = await self.db["idempotency_keys"].find_one(
+                {"idempotency_key": payload.idempotency_key}
+            )
+            return BulkSyncResponse(**{**existing["response"], "cached": True})
 
         return response
 
@@ -106,6 +114,62 @@ class InventoryService:
             tenant_id=payload.tenant_id,
             quantity_reserved=payload.quantity_requested,
             remaining_quantity=updated["quantity"],
+        )
+        
+
+    async def get_analytics(
+        self, tenant_id: str, low_stock_threshold: int = 10
+    ) -> AnalyticsResponse:
+        pipeline = [
+            {"$match": {"tenant_id": tenant_id}},
+            {
+                "$facet": {
+                    "summary": [
+                        {
+                            "$group": {
+                                "_id": None,
+                                "total_skus": {"$sum": 1},
+                                "total_quantity": {"$sum": "$quantity"},
+                            }
+                        }
+                    ],
+                    "low_stock": [
+                        {"$match": {"quantity": {"$lte": low_stock_threshold}}},
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "product_id": 1,
+                                "sku": 1,
+                                "quantity": 1,
+                            }
+                        },
+                        {"$sort": {"quantity": 1}},
+                    ],
+                }
+            },
+        ]
+
+        result = await self.db["inventory"].aggregate(pipeline).to_list(length=1)
+
+        if not result:
+            return AnalyticsResponse(
+                tenant_id=tenant_id,
+                total_skus=0,
+                total_quantity=0,
+                low_stock_count=0,
+                low_stock_items=[],
+            )
+
+        data = result[0]
+        summary = data["summary"][0] if data["summary"] else {"total_skus": 0, "total_quantity": 0}
+        low_stock = data["low_stock"]
+
+        return AnalyticsResponse(
+            tenant_id=tenant_id,
+            total_skus=summary["total_skus"],
+            total_quantity=summary["total_quantity"],
+            low_stock_count=len(low_stock),
+            low_stock_items=[LowStockItem(**item) for item in low_stock],
         )
 
 
