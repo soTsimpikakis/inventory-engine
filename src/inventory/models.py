@@ -34,3 +34,17 @@ class ReserveResponse(BaseModel):
     tenant_id: str
     quantity_reserved: int
     remaining_quantity: int
+
+
+class LowStockItem(BaseModel):
+    product_id: str
+    sku: str
+    quantity: int
+
+
+class AnalyticsResponse(BaseModel):
+    tenant_id: str
+    total_skus: int
+    total_quantity: int
+    low_stock_count: int
+    low_stock_items: list[LowStockItem]
