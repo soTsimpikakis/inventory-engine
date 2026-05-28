@@ -2,11 +2,15 @@ from datetime import datetime, UTC
 
 from fastapi import HTTPException, Depends, Request
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from pymongo import ReturnDocument
+from pymongo import ReturnDocument, UpdateOne
+from pymongo.errors import DuplicateKeyError
+
 from .models import (
+    AnalyticsResponse,
     BulkSyncItem,
     BulkSyncRequest,
     BulkSyncResponse,
+    LowStockItem,
     ReserveRequest,
     ReserveResponse,
 )
@@ -40,41 +44,45 @@ class InventoryService:
             {"idempotency_key": payload.idempotency_key}
         )
         if existing:
-            return BulkSyncResponse(**existing["response"])
+            return BulkSyncResponse(**{**existing["response"], "cached": True})
 
-        for item in payload.items:
-            await self.db["inventory"].update_one(
-                {
-                    "tenant_id": payload.tenant_id,
-                    "product_id": item.product_id,
-                },
+        now = datetime.now(UTC)
+        operations = [
+            UpdateOne(
+                {"tenant_id": payload.tenant_id, "product_id": item.product_id},
                 {
                     "$set": {
                         "sku": item.sku,
                         "quantity": item.quantity,
-                        "updated_at": datetime.now(UTC),
+                        "updated_at": now,
                     },
-                    "$setOnInsert": {
-                        "created_at": datetime.now(UTC),
-                    },
+                    "$setOnInsert": {"created_at": now},
                 },
                 upsert=True,
             )
+            for item in payload.items
+        ]
+        await self.db["inventory"].bulk_write(operations, ordered=False)
 
         response = BulkSyncResponse(
             idempotency_key=payload.idempotency_key,
             tenant_id=payload.tenant_id,
             processed=len(payload.items),
-            cached=False,
         )
 
-        await self.db["idempotency_keys"].insert_one(
-            {
-                "idempotency_key": payload.idempotency_key,
-                "response": response.model_dump(),
-                "created_at": datetime.now(UTC),
-            }
-        )
+        try:
+            await self.db["idempotency_keys"].insert_one(
+                {
+                    "idempotency_key": payload.idempotency_key,
+                    "response": response.model_dump(),
+                    "created_at": now,
+                }
+            )
+        except DuplicateKeyError:
+            existing = await self.db["idempotency_keys"].find_one(
+                {"idempotency_key": payload.idempotency_key}
+            )
+            return BulkSyncResponse(**{**existing["response"], "cached": True})
 
         return response
 
@@ -107,7 +115,7 @@ class InventoryService:
             quantity_reserved=payload.quantity_requested,
             remaining_quantity=updated["quantity"],
         )
-
+        
 
 def get_db(request: Request) -> AsyncIOMotorDatabase:
     return request.app.state.db
