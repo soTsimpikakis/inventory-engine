@@ -12,6 +12,22 @@ from .service import InventoryService, get_inventory_service
 
 router = APIRouter()
 
+
+# /analytics must be declared before /{product_id} so the literal segment matches first.
+@router.get("/analytics", response_model=AnalyticsResponse)
+async def get_analytics(
+    tenant_id: str = Query(..., description="Tenant identifier"),
+    low_stock_threshold: int = Query(
+        10, ge=0, description="Items at or below this quantity are flagged as low stock"
+    ),
+    service: InventoryService = Depends(get_inventory_service),
+):
+    return await service.get_analytics(
+        tenant_id=tenant_id,
+        low_stock_threshold=low_stock_threshold,
+    )
+
+
 @router.get("/", response_model=list[BulkSyncItem])
 async def list_items(
     skip: int = 0,
@@ -51,19 +67,3 @@ async def reserve(
     service: InventoryService = Depends(get_inventory_service),
 ):
     return await service.reserve(payload)
-
-
-
-@router.get("/analytics", response_model=AnalyticsResponse)
-async def get_analytics(
-    tenant_id: str = Query(..., description="Tenant identifier"),
-    low_stock_threshold: int = Query(
-        10, ge=0, description="Items at or below this quantity are flagged as low stock"
-    ),
-    service: InventoryService = Depends(get_inventory_service),
-):
-    return await service.get_analytics(
-        tenant_id=tenant_id,
-        low_stock_threshold=low_stock_threshold,
-    )
-
