@@ -117,6 +117,62 @@ class InventoryService:
         )
         
 
+    async def get_analytics(
+        self, tenant_id: str, low_stock_threshold: int = 10
+    ) -> AnalyticsResponse:
+        pipeline = [
+            {"$match": {"tenant_id": tenant_id}},
+            {
+                "$facet": {
+                    "summary": [
+                        {
+                            "$group": {
+                                "_id": None,
+                                "total_skus": {"$sum": 1},
+                                "total_quantity": {"$sum": "$quantity"},
+                            }
+                        }
+                    ],
+                    "low_stock": [
+                        {"$match": {"quantity": {"$lte": low_stock_threshold}}},
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "product_id": 1,
+                                "sku": 1,
+                                "quantity": 1,
+                            }
+                        },
+                        {"$sort": {"quantity": 1}},
+                    ],
+                }
+            },
+        ]
+
+        result = await self.db["inventory"].aggregate(pipeline).to_list(length=1)
+
+        if not result:
+            return AnalyticsResponse(
+                tenant_id=tenant_id,
+                total_skus=0,
+                total_quantity=0,
+                low_stock_count=0,
+                low_stock_items=[],
+            )
+
+        data = result[0]
+        summary = data["summary"][0] if data["summary"] else {"total_skus": 0, "total_quantity": 0}
+        low_stock = data["low_stock"]
+
+        return AnalyticsResponse(
+            tenant_id=tenant_id,
+            total_skus=summary["total_skus"],
+            total_quantity=summary["total_quantity"],
+            low_stock_count=len(low_stock),
+            low_stock_items=[LowStockItem(**item) for item in low_stock],
+        )
+
+
 def get_db(request: Request) -> AsyncIOMotorDatabase:
     return request.app.state.db
 
