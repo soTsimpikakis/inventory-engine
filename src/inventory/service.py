@@ -62,7 +62,8 @@ class InventoryService:
             )
             for item in payload.items
         ]
-        await self.db["inventory"].bulk_write(operations, ordered=False)
+        if operations:
+            await self.db["inventory"].bulk_write(operations, ordered=False)
 
         response = BulkSyncResponse(
             idempotency_key=payload.idempotency_key,
