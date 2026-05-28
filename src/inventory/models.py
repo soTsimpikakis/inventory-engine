@@ -17,3 +17,16 @@ class BulkSyncResponse(BaseModel):
     idempotency_key: str
     tenant_id: str
     processed: int
+
+class ReserveRequest(BaseModel):
+    tenant_id: str
+    product_id: str
+    user_id: str
+    quantity_requested: int
+ 
+ 
+class ReserveResponse(BaseModel):
+    product_id: str
+    tenant_id: str
+    quantity_reserved: int
+    remaining_quantity: int

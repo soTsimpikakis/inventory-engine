@@ -2,7 +2,15 @@ from datetime import datetime, UTC
 
 from fastapi import HTTPException, Depends, Request
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from .models import BulkSyncItem, BulkSyncRequest, BulkSyncResponse
+from pymongo import ReturnDocument
+from .models import (
+    BulkSyncItem,
+    BulkSyncRequest,
+    BulkSyncResponse,
+    ReserveRequest,
+    ReserveResponse,
+)
+
 
 class InventoryService:
     def __init__(self, db: AsyncIOMotorDatabase):
@@ -28,14 +36,12 @@ class InventoryService:
         return BulkSyncItem(**doc)
 
     async def bulk_sync(self, payload: BulkSyncRequest) -> BulkSyncResponse:
-        # Check idempotency key — return cached response if already processed
         existing = await self.db["idempotency_keys"].find_one(
             {"idempotency_key": payload.idempotency_key}
         )
         if existing:
             return BulkSyncResponse(**existing["response"])
 
-        # Upsert each item: set sku and quantity, create doc if missing
         for item in payload.items:
             await self.db["inventory"].update_one(
                 {
@@ -62,7 +68,6 @@ class InventoryService:
             cached=False,
         )
 
-        # Store idempotency key with the response so repeated calls return it
         await self.db["idempotency_keys"].insert_one(
             {
                 "idempotency_key": payload.idempotency_key,
@@ -73,16 +78,42 @@ class InventoryService:
 
         return response
 
+    async def reserve(self, payload: ReserveRequest) -> ReserveResponse:
+        updated = await self.db["inventory"].find_one_and_update(
+            {
+                "tenant_id": payload.tenant_id,
+                "product_id": payload.product_id,
+                "quantity": {"$gte": payload.quantity_requested},
+            },
+            {
+                "$inc": {"quantity": -payload.quantity_requested},
+                "$set": {"updated_at": datetime.now(UTC)},
+            },
+            return_document=ReturnDocument.AFTER,
+        )
 
-# Dependency to get the MongoDB database from FastAPI app state
+        if updated is None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Insufficient stock for product '{payload.product_id}'. "
+                    "Requested quantity unavailable."
+                ),
+            )
+
+        return ReserveResponse(
+            product_id=payload.product_id,
+            tenant_id=payload.tenant_id,
+            quantity_reserved=payload.quantity_requested,
+            remaining_quantity=updated["quantity"],
+        )
+
+
 def get_db(request: Request) -> AsyncIOMotorDatabase:
     return request.app.state.db
 
 
-# Dependency to get the InventoryService with injected database
 def get_inventory_service(
     db: AsyncIOMotorDatabase = Depends(get_db),
 ) -> InventoryService:
     return InventoryService(db)
-
-

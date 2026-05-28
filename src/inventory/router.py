@@ -1,7 +1,12 @@
 from fastapi import APIRouter, Depends
-from .models import BulkSyncItem, BulkSyncRequest, BulkSyncResponse
+from .models import (
+    BulkSyncItem,
+    BulkSyncRequest,
+    BulkSyncResponse,
+    ReserveRequest,
+    ReserveResponse,
+)
 from .service import InventoryService, get_inventory_service
-
 
 router = APIRouter()
 
@@ -37,3 +42,11 @@ async def bulk_sync(
     service: InventoryService = Depends(get_inventory_service),
 ):
     return await service.bulk_sync(payload)
+
+
+@router.post("/reserve", response_model=ReserveResponse, status_code=200)
+async def reserve(
+    payload: ReserveRequest,
+    service: InventoryService = Depends(get_inventory_service),
+):
+    return await service.reserve(payload)

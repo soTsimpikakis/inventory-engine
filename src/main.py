@@ -30,9 +30,6 @@ async def lifespan(app: FastAPI):
     client.close()
 
 
-# def get_db(request: Request) -> AsyncIOMotorDatabase:
-#     return request.app.state.db
-
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Inventory Engine", version="1.0.0", lifespan=lifespan)
